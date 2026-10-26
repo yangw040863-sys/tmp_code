@@ -19,13 +19,13 @@ def parse_args():
 
     parser.add_argument('--cfg', help='experiment configuration filename', type=str,
                         default='setting.yaml')
-    parser.add_argument('--add_note', type=str, default='T3_test')
+    parser.add_argument('--add_note', type=str, default='T5_test')
     parser.add_argument('--gpu_list', default=0 , type=str , nargs='+')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--load_epoch', default=0, type=int)
     parser.add_argument('--save_interval', default=1, type=int)
-    parser.add_argument('--dpath', default="./models/Model3DisGraph.pth", type=str)
-    parser.add_argument('--gpath', default="./models/Model3GenGraph.pth", type=str)
+    parser.add_argument('--dpath', default="./models/Model3DisGraphCABM.pth", type=str)
+    parser.add_argument('--gpath', default="./models/Model3GenGraphCABM.pth", type=str)
 
     args = parser.parse_args()
     update_config(config, args)
@@ -129,6 +129,12 @@ def main():
     elif args.add_note.find("T3") != -1:
         from lib.models_baseline import baseline_modelT3 as models
         from lib.core import function_baseline_T3 as function
+    elif args.add_note.find("T4") !=-1:
+        from lib.models_baseline import baseline_modelT4 as models
+        from lib.core import function_baseline_T4 as function
+    elif args.add_note.find("T5") !=-1:
+        from lib.models_baseline import baseline_modelT5 as models
+        from lib.core import function_baseline_T5 as function
 
     save_dir_name = os.path.basename(args.cfg).split('.')[0] + "_" +args.add_note
     logger, final_output_dir, tb_log_dir = \
@@ -149,12 +155,13 @@ def main():
         dataset=dataset_type(config,
                              is_train=False),
         batch_size=config.TEST.BATCH_SIZE_PER_GPU * len(gpus),
-        shuffle=True,
+        shuffle=False,
         drop_last=True,
         num_workers=config.WORKERS,
         pin_memory=config.PIN_MEMORY,
         collate_fn=collate_fn
     )
+    # collate_fn = collate_fn
     for epoch in range(1):
         function.validate(config, val_loader, model, model_D, criterion, epoch, writer_dict=None,log_dir = final_output_dir)
 

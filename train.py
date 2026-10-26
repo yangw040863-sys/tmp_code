@@ -67,11 +67,10 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
-setup_seed(666)
+setup_seed(777)
 
 
 def collate_fn(batch):
-
     Sample_In_RN = torch.stack([item[0] for item in batch], dim=0)
     Sample_In_Quant_temp = torch.stack([item[1] for item in batch], dim=0)
     Sample_In_Vis_temp = torch.stack([item[2] for item in batch], dim=0)
@@ -128,7 +127,6 @@ def collate_fn(batch):
 
 def main():
     args = parse_args()
-
     if args.add_note.find("T2") != -1:
         from lib.models_baseline import baseline_modelT2 as models
         from lib.core import function_baseline_T2 as function
@@ -138,6 +136,9 @@ def main():
     elif args.add_note.find("T3") != -1:
         from lib.models_baseline import baseline_modelT3 as models
         from lib.core import function_baseline_T3 as function
+    elif args.add_note.find("T4") !=-1:
+        from lib.models_baseline import baseline_modelT4 as models
+        from lib.core import function_baseline_T4 as function
 
     save_dir_name = os.path.basename(args.cfg).split('.')[0] + "_" +args.add_note
     logger, final_output_dir, tb_log_dir = \
@@ -185,15 +186,13 @@ def main():
         shuffle=config.TRAIN.SHUFFLE,
         num_workers=config.WORKERS,
         drop_last=True,
-        pin_memory=config.PIN_MEMORY,
-    collate_fn=collate_fn)
+        pin_memory=config.PIN_MEMORY)
 
     print(config.TRAIN.END_EPOCH)
     # criterion损失函数 MSELoss均方差损失函数
     for epoch in range(begin_epoch, config.TRAIN.END_EPOCH):
         function.train(config, train_loader, model, model_D, criterion, optimizer_g, optimizer_d, epoch, writer_dict,log_dir = final_output_dir)
         adjust_learning_rate(5e-05, optimizer_g, (epoch + 1))
-        adjust_learning_rate(2e-05, optimizer_d, (epoch + 1))
         if epoch % args.save_interval == 0:
             save_load_model_generator(model, (epoch + 1), config, final_output_dir)
             save_load_model_discriminator(model_D, (epoch + 1), config, final_output_dir)

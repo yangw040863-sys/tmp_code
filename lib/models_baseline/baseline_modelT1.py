@@ -131,7 +131,6 @@ def weights_init(net, init_type='kaiming', init_gain=0.02):
             nn.init.normal_(m.weight, 0, 0.01)
             nn.init.constant_(m.bias, 0)
 
-
     net.apply(init_func)
 
 

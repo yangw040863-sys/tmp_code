@@ -99,8 +99,7 @@ class  GEOSTREET_V1(data.Dataset):
 
         # print(Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr))
         return Sample_In_RN, Sample_In_Quant_temp, Sample_In_Vis_temp, Sample_In_Guid, Sample_In_ND,\
-               Sample_GT256, Sample_GT64JC_ALL, Sample_GT64ST, Slopmap,Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr)
-
+               Sample_GT256, Sample_GT64JC_ALL, Sample_GT64ST, Slopmap, Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr)
 
 if __name__ == '__main__':
     pass

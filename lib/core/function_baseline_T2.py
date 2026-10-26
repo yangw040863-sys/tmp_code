@@ -16,6 +16,7 @@ import os
 logger = logging.getLogger(__name__)
 L1Loss = nn.L1Loss()
 
+from skimage.metrics import structural_similarity as ssim
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -59,20 +60,21 @@ def mask_gen(tensor, hole_sizemin, hole_sizemmax, pool_w):
     for i in range(tensor.shape[0]):
         n_holes = 1
         for _ in range(n_holes):
+           #  hole_w = 100
+           #  hole_w_div2 = hole_w / 2
+           #  hole_h = 100
+           #  hole_h_div2 = hole_h / 2
+           # mask_in[i, :, int(120 - hole_w_div2): int(120 + hole_w_div2),
+           #  int(120 - hole_h_div2): int(120 + hole_h_div2)] = 1.0
+            # 中心点
+            PoolC_x = tensor.shape[2] // 2
+            PoolC_y = tensor.shape[3] // 2
+            # 掩码范围
+            hole_w_div2 = 96 // 2
+            hole_h_div2 = 96 // 2
+            mask_in[i, :, int(PoolC_x - hole_w_div2): int(PoolC_x + hole_w_div2),
+            int(PoolC_y - hole_h_div2): int(PoolC_y + hole_h_div2)] = 1.0
 
-            # hole_w = random.randint(hole_sizemin, hole_sizemmax)
-            hole_w=120
-            hole_w_div2 = hole_w / 2
-
-            # hole_h = random.randint(hole_sizemin, hole_sizemmax)
-            hole_h=120
-            hole_h_div2 = hole_h / 2
-
-            # PoolC_x = random.randint((tensor.shape[2] / 2 - pool_w / 2), (tensor.shape[2] / 2 + pool_w / 2))
-            # PoolC_y = random.randint((tensor.shape[3] / 2 - pool_w / 2), (tensor.shape[3] / 2 + pool_w / 2))
-            # mask_in[i, :, int(PoolC_x - hole_w_div2): int(PoolC_x + hole_w_div2),int(PoolC_y - hole_h_div2): int(PoolC_y + hole_h_div2)] = 1.0
-
-            mask_in[i, :, int(120 - hole_w_div2): int(120 + hole_w_div2),int(120 - hole_h_div2): int(120 + hole_h_div2)] = 1.0
     return mask_in
 
 
@@ -258,7 +260,14 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
     hole_sizemmax = 96
     pool_w = 64
 
-    Tensor = torch.cuda.FloatTensor
+    count = 0
+    diceCount=0
+    total_mae = 0
+    total_mse = 0
+    total_ssim = 0
+    total_dice=0
+    total_jac=0
+
 
     with torch.no_grad():
 
@@ -302,8 +311,6 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
 
             GAN_Loss = - torch.mean(fake_scalar_2)
             loss =  2 * second_MaskL1Loss + 2 * first_MaskL1Loss + 1 * GAN_Loss
-            
-            
 
             Test_losses.update(loss.item(), inp_RN.size(0))
             Test_loss_ST.update(first_MaskL1Loss.item(), inp_RN.size(0))
@@ -313,63 +320,96 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
             
             batch_time.update(time.time() - end)
             end = time.time()
-            Takeitem = int(random.randint(1, int(inp_RN.size(0))) - 1)
-            imgss = []
 
-            score_map_in_rn = inp_RN[Takeitem:Takeitem + 1, :, :, :].clone().data.cpu()
-            score_map_in_rn = (score_map_in_rn + 1) / 2 * 255
-            score_map_in_guid = inp_guid[Takeitem:Takeitem + 1, :, :, :].clone().data.cpu()
-            score_map_in_guid = (score_map_in_guid + 1) / 2 * 255
+            output_ST_cpu=output_ST.cpu().numpy()
+            output_STCorase_cpu = out_coarse.cpu().numpy()
+            target_256_cpu = target_256.cpu().numpy()
+            masks_cpu = msks.cpu().numpy()
+            masks_0_1_cpu = masks_0_1.cpu().numpy()
 
-            score_map_IN = np.zeros((1, 3, 256, 256))
-            score_map_IN[:, 0:1, :, :] = score_map_in_rn[:, 0:1, :, :].numpy()
-            score_map_IN[:, 1:2, :, :] = score_map_in_guid[:, 0:1, :, :].numpy()
-            score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
-            imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
+            for j in range(inp_RN.size(0)):
+                imgss = []
 
-            # score_map_out = out_coarse_Masked[Takeitem:Takeitem + 1, :, :, :].clone().data.cpu()
-            # score_map_out = (score_map_out + 1) / 2 * 255
-            # score_map_IN = np.zeros((1, 3, 256, 256))
-            # score_map_IN[:, 0:1, :, :] = score_map_out[:, 0:1, :, :].numpy()
-            # score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
-            # imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
+                score_map_in_rn = inp_RN[j, :, :, :].clone().data.cpu()
+                score_map_in_rn = (score_map_in_rn + 1) / 2 * 255
+                score_map_in_guid = inp_guid[j, :, :, :].clone().data.cpu()
+                score_map_in_guid = (score_map_in_guid + 1) / 2 * 255
+                score_map_IN = np.zeros((1, 3, 256, 256))
+                score_map_IN[0, 0:1, :, :] = score_map_in_rn[:, :, :].numpy()
+                score_map_IN[0, 1:2, :, :] = score_map_in_guid[:, :, :].numpy()
+                score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
+                imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
 
-            score_map_out = ST_Out_Masked[Takeitem:Takeitem + 1, :, :, :].clone().data.cpu()
-            score_map_out = (score_map_out + 1) / 2 * 255
-            score_map_IN = np.zeros((1, 3, 256, 256))
-            score_map_IN[:, 0:1, :, :] = score_map_out[:, 0:1, :, :].numpy()
-            score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
-            imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
+                masks_cpu_Item = masks_cpu[j, :, :, :]
+                output_ST_cpu_Item = output_ST_cpu[j, :, :, :]
+                masks_0_1_cpu_Item = masks_0_1_cpu[j, :, :, :]
+                target_256_cpu_Item = target_256_cpu[j, :, :, :]
 
-            score_map_GT = target_256[Takeitem:Takeitem + 1, :, :, :].clone().data.cpu()
-            score_map_GT = (score_map_GT + 1) / 2 * 255
-            score_map_IN = np.zeros((1, 3, 256, 256))
-            score_map_IN[:, 0:1, :, :] = score_map_GT[:, 0:1, :, :].numpy()
-            score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
-            imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
+                red_mask = ((masks_cpu_Item * output_ST_cpu_Item + masks_0_1_cpu_Item * target_256_cpu_Item) + 1) / 2 * 255
+                score_map_IN = np.zeros((1, 3, 256, 256))
+                score_map_IN[0, 0, :, :] = red_mask  # 设置红色通道
+                white_non_mask = ((masks_0_1_cpu_Item * target_256_cpu_Item) + 1 - masks_cpu_Item) / 2 * 255
+                score_map_IN[0, 1:2, :, :] = white_non_mask  # 设置绿色和蓝色通道
+                score_map_IN[0, 2:3, :, :] = white_non_mask  # 设置绿色和蓝色通道
+                img1 = red_mask.squeeze(0).astype('uint8')
+                score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
+                imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
 
-            coumtcount = 0
-            for names in ['输入', '输出','真实']:
+                score_map_GT = target_256[j, :, :, :].clone().data.cpu()
+                score_map_GT = (score_map_GT + 1) / 2 * 255
+                score_map_IN = np.zeros((1, 3, 256, 256))
+                score_map_IN[0, 0:1, :, :] = score_map_GT[0:1, :, :].numpy()
+                img2 = score_map_GT.squeeze(0).numpy().astype('uint8')
+                score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
+                imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
 
-                output_dir = log_dir + '/out_imgs/实验四/'
-                if not os.path.exists(output_dir):
-                    os.makedirs(output_dir)
-                outputname = log_dir+'/out_imgs/实验四/' + "Test" + str(i) + "_" + names + ".png"
-                imgss[coumtcount].save(outputname)
-                coumtcount = coumtcount + 1
+                start_x, start_y = 80, 80
+                end_x, end_y = 176, 176
+                count_loss_GT = img1[start_x:end_x, start_y:end_y]
+                count_loss_Out = img2[start_x:end_x, start_y:end_y]
+                threshold = 128
+                binary_GT = (count_loss_GT >= threshold).astype(int)
+                binary_Out = (count_loss_Out >= threshold).astype(int)
 
+                intersection = np.sum(binary_GT * binary_Out)
+                dice = (2 * intersection) / (np.sum(binary_GT) + np.sum(binary_Out))
 
-    msg = 'Test Epoch {} time:{:.4f} Tloss:{:.4f} STloss:{:.4f} ST_M_loss:{:.4f} GANloss:{:.4f} Disloss:{:.4f}'.format(
-        epoch, batch_time.avg, Test_losses.avg, Test_loss_ST.avg, Test_loss_M_ST.avg, Test_loss_G.avg,
-        Test_loss_Dis.avg)
-    print(msg)
-    logger.info(msg)
+                union = np.sum(binary_GT) + np.sum(binary_Out) - intersection
+                jac = intersection / union
 
-    if writer_dict is not None:
-        writer = writer_dict['writer']
-        global_steps = writer_dict['valid_global_steps']
-        writer.add_scalar('valid_loss', Test_losses.avg, global_steps)
-        writer_dict['valid_global_steps'] = global_steps + 1
+                mae = np.mean(np.abs(count_loss_GT - count_loss_Out))
+                mse = np.mean(np.square(count_loss_GT - count_loss_Out))
+                ssim_value = ssim(count_loss_GT, count_loss_Out)
+                total_mae += mae
+                total_mse += mse
+                total_ssim += ssim_value
+                count += 1
+
+                if not np.isnan(dice):
+                    total_dice += dice
+                    total_jac += jac
+                    diceCount += 1
+
+                coumtcount = 0
+                for names in ['输入', '输出', '真实']:
+
+                    output_dir = log_dir + '/out_imgs/实验二/'
+                    if not os.path.exists(output_dir):
+                        os.makedirs(output_dir)
+                    outputname = log_dir + '/out_imgs/实验二/' + "Test" + str(count) + "_" + names + ".png"
+                    imgss[coumtcount].save(outputname)
+                    coumtcount = coumtcount + 1
+    average_mae = total_mae / count
+    average_mse = total_mse / count
+    average_ssim = total_ssim / count
+    average_dice = total_dice / diceCount
+    average_jac = total_jac / diceCount
+
+    print(f"平均MAE: {average_mae}")
+    print(f"平均MSE: {average_mse}")
+    print(f"平均SSIM: {average_ssim}")
+    print(f"平均Dice: {average_dice}")
+    print(f"平均Jac: {average_jac}")
 
     return lossoutsum
 

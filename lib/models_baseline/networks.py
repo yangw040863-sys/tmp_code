@@ -4,7 +4,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.nn import Parameter
 from torch_geometric.data import Data, Batch
-from torch_geometric.nn import GCNConv
+from torch_geometric.nn import GCNConv, GATv2Conv
 
 
 def l2normalize(v, eps=1e-12):
@@ -827,6 +827,198 @@ class InpaintSANet_v2(torch.nn.Module):
         super(InpaintSANet_v2, self).__init__()
         cnum = 32
         print("change encoder")
+        self.coarse_net = nn.Sequential(
+
+            GatedConv2dWithActivation(4, cnum, 5, 1, padding=get_pad(256, 5, 1)),
+
+            GatedConv2dWithActivation(cnum, 2 * cnum, 4, 2, padding=get_pad(256, 4, 2)),
+            GatedConv2dWithActivation(2 * cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+
+            GatedConv2dWithActivation(2 * cnum, 4 * cnum, 4, 2, padding=get_pad(128, 4, 2)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, dilation=2, padding=get_pad(64, 3, 1, 2)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, dilation=4, padding=get_pad(64, 3, 1, 4)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, dilation=8, padding=get_pad(64, 3, 1, 8)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, dilation=16, padding=get_pad(64, 3, 1, 16)),
+        )
+        self.conv_topo_vt_pred = nn.Sequential(
+            GatedConv2dWithActivation(9, cnum, 5, 1, padding=get_pad(256, 5, 1)),
+
+            GatedConv2dWithActivation(cnum, 2 * cnum, 4, 2, padding=get_pad(256, 4, 2)),
+            GatedConv2dWithActivation(2 * cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+
+            GatedConv2dWithActivation(2 * cnum, 4 * cnum, 4, 2, padding=get_pad(128, 4, 2)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+        )
+        self.conv_topo = nn.Sequential(
+            GatedConv2dWithActivation(9, cnum, 5, 1, padding=get_pad(256, 5, 1)),
+
+            GatedConv2dWithActivation(cnum, 2 * cnum, 4, 2, padding=get_pad(256, 4, 2)),
+            GatedConv2dWithActivation(2 * cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+
+            GatedConv2dWithActivation(2 * cnum, 4 * cnum, 4, 2, padding=get_pad(128, 4, 2)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+        )
+
+        self.coarse_upsample_net = nn.Sequential(
+            GatedConv2dWithActivation(8 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+
+            GatedDeConv2dWithActivation(2, 4 * cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+
+            GatedConv2dWithActivation(2 * cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+            GatedDeConv2dWithActivation(2, 2 * cnum, cnum, 3, 1, padding=get_pad(256, 3, 1)),
+
+            GatedConv2dWithActivation(cnum, cnum // 2, 3, 1, padding=get_pad(256, 3, 1)),
+
+            GatedConv2dWithActivation(cnum // 2, 1, 3, 1, padding=get_pad(128, 3, 1), activation=None)
+        )
+
+        self.coarse_topobranch_upsample_net = nn.Sequential(
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+
+            GatedDeConv2dWithActivation(2, 4 * cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+
+            GatedConv2dWithActivation(2 * cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+            GatedDeConv2dWithActivation(2, 2 * cnum, cnum, 3, 1, padding=get_pad(256, 3, 1)),
+
+            GatedConv2dWithActivation(cnum, cnum // 2, 3, 1, padding=get_pad(256, 3, 1)),
+
+            GatedConv2dWithActivation(cnum // 2, 1, 3, 1, padding=get_pad(128, 3, 1), activation=None)
+        )
+
+        self.refine_conv_net = nn.Sequential(
+
+
+            GatedConv2dWithActivation(5, cnum, 5, 1, padding=get_pad(256, 5, 1)),
+
+            GatedConv2dWithActivation(cnum, cnum, 4, 2, padding=get_pad(256, 4, 2)),
+            GatedConv2dWithActivation(cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+
+            GatedConv2dWithActivation(2 * cnum, 2 * cnum, 4, 2, padding=get_pad(128, 4, 2)),
+            GatedConv2dWithActivation(2 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, dilation=2, padding=get_pad(64, 3, 1, 2)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, dilation=4, padding=get_pad(64, 3, 1, 4)),
+
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, dilation=8, padding=get_pad(64, 3, 1, 8)),
+
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, dilation=16, padding=get_pad(64, 3, 1, 16))
+        )
+
+        self.refine_conv_net_CA_branch_prior = nn.Sequential(
+
+            GatedConv2dWithActivation(5, cnum, 5, 1, padding=get_pad(256, 5, 1)),
+
+            GatedConv2dWithActivation(cnum, cnum, 4, 2, padding=get_pad(256, 4, 2)),
+            GatedConv2dWithActivation(cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+
+            GatedConv2dWithActivation(2 * cnum, 2 * cnum, 4, 2, padding=get_pad(128, 4, 2)),
+            GatedConv2dWithActivation(2 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+
+        )
+        self.refine_attn = Self_Attn(4 * cnum, 'relu', with_attn=False)
+
+        self.refine_conv_net_CA_branch_post = nn.Sequential(
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+        )
+
+        self.refine_conv_net_topobranch = nn.Sequential(
+            GatedConv2dWithActivation(4, cnum, 5, 1, padding=get_pad(256, 5, 1)),
+
+
+            GatedConv2dWithActivation(cnum, 2 * cnum, 4, 2, padding=get_pad(256, 4, 2)),
+            GatedConv2dWithActivation(2 * cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+
+            GatedConv2dWithActivation(2 * cnum, 4 * cnum, 4, 2, padding=get_pad(128, 4, 2)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+        )
+
+        self.refine_upsample_net = nn.Sequential(
+            GatedConv2dWithActivation(12 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+
+            GatedConv2dWithActivation(4 * cnum, 4 * cnum, 3, 1, padding=get_pad(64, 3, 1)),
+            GatedDeConv2dWithActivation(2, 4 * cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+            GatedConv2dWithActivation(2 * cnum, 2 * cnum, 3, 1, padding=get_pad(128, 3, 1)),
+            GatedDeConv2dWithActivation(2, 2 * cnum, cnum, 3, 1, padding=get_pad(256, 3, 1)),
+
+            GatedConv2dWithActivation(cnum, cnum // 2, 3, 1, padding=get_pad(256, 3, 1)),
+
+            GatedConv2dWithActivation(cnum // 2, 1, 3, 1, padding=get_pad(256, 3, 1), activation=None),
+        )
+        self.avgpool4 = nn.AvgPool2d((4,4))
+
+    def forward(self, masks=None, ContextRN=None, GuidRefine=None, NDRefine=None, TopoRaw=None, pixel_mask=None):
+
+        TopoRaw = TopoRaw * pixel_mask
+        topo_processed = TopoRaw.clone()
+        x_in = torch.cat((ContextRN, GuidRefine, NDRefine, masks), 1)
+        x = self.coarse_net(x_in)
+
+        x_in_topo_branch_vt = torch.cat((GuidRefine, NDRefine, TopoRaw), 1)
+        x_topo_branch_4vertices_in = self.conv_topo_vt_pred(x_in_topo_branch_vt)
+        x_topo_branch = x_topo_branch_4vertices_in.clone()
+
+
+        x_topo_branch_4vertices = self.coarse_topobranch_upsample_net(x_topo_branch_4vertices_in)
+        x_topo_branch_4vertices_out = x_topo_branch_4vertices.tanh().clone()
+        x_cont_in = torch.cat((x, x_topo_branch), 1)
+        x_cont = self.coarse_upsample_net(x_cont_in).tanh()
+
+        coarse_x = x_cont
+        coarse_x_out = coarse_x.clone()
+
+
+
+        masked_imgs = ContextRN * (1 - masks) + coarse_x * masks
+        masked_imgs_4CAbranch = masked_imgs.clone()
+        masked_imgs_4Topobranch = masked_imgs.clone()
+        x_in_refine = torch.cat((masked_imgs, GuidRefine, NDRefine, masks, x_topo_branch_4vertices_out), 1)
+        x_refine = self.refine_conv_net(x_in_refine)
+
+
+        x_in_refine_CA_branch = torch.cat((masked_imgs_4CAbranch, GuidRefine, NDRefine, masks, x_topo_branch_4vertices_out),
+                                          1)
+        x_refine_CA_branch = self.refine_conv_net_CA_branch_prior(x_in_refine_CA_branch)
+        x_refine_CA_branch = self.refine_attn(x_refine_CA_branch)
+        x_refine_CA_branch = self.refine_conv_net_CA_branch_post(x_refine_CA_branch)
+
+
+        x_in_refine_topo_branch = torch.cat((GuidRefine, NDRefine, x_topo_branch_4vertices_out, masked_imgs_4Topobranch), 1)
+        x_refine_topo_branch = self.refine_conv_net_topobranch(x_in_refine_topo_branch)
+        x_cont_refine_in = torch.cat((x_refine, x_refine_CA_branch, x_refine_topo_branch), 1)
+        x_cont_refine = self.refine_upsample_net(x_cont_refine_in).tanh()
+
+        return coarse_x_out, x_topo_branch_4vertices_out, x_cont_refine, topo_processed, pixel_mask
+
+
+class InpaintSANet_v3(torch.nn.Module):
+
+    def __init__(self, n_in_channel=11):
+        super(InpaintSANet_v3, self).__init__()
+        cnum = 32
+        print("change encoder")
 
         self.coarse_net = nn.Sequential(
 
@@ -1130,6 +1322,7 @@ class InpaintSANet_v2(torch.nn.Module):
                     start_y=59
 
                 x_refine_graph[graph_id, :, start_x:end_x, start_y:end_y] = updated_feature[:, :, : ]
+
         x_refine_graph=self.upChannel(x_refine_graph)
         # x_refine64=self.to64Channel(x_refine)
         # x_refine_CA_branch64=self.to64Channel(x_refine_CA_branch)
@@ -1137,7 +1330,12 @@ class InpaintSANet_v2(torch.nn.Module):
         # 所有特征拼接第一次上采样
         # x_cont_refine_in = torch.cat((x_refine64, x_refine_CA_branch64, x_refine_topo_branch64, x_refine_graph), 1)
         x_cont_refine_in = torch.cat((x_refine, x_refine_CA_branch, x_refine_topo_branch, x_refine_graph), 1)
-        x_cont_refine = self.refine_up1(x_cont_refine_in)
+
+        cbam = CBAM(in_channels=512).to("cuda")
+        fused_features=cbam(x_cont_refine_in)
+        x_cont_refine = self.refine_up1(fused_features)
+
+        # x_cont_refine = self.refine_up1(x_cont_refine_in)
         x_cont_refine = torch.cat((x_cont_refine, x_refine_down2), 1)
         # 结合之前高维特征第二次上采样
         x_cont_refine = self.refine_up2(x_cont_refine)
@@ -1149,18 +1347,28 @@ class InpaintSANet_v2(torch.nn.Module):
         return coarse_x_out, x_topo_branch_4vertices_out, x_cont_refine, topo_processed, pixel_mask
 
 
+
+
 class GCN(nn.Module):
     def __init__(self):
         super(GCN, self).__init__()
+
         self.conv1 = GCNConv(250, 125)
         self.conv2 = GCNConv(125, 25)
 
+        # self.conv1 = GATv2Conv(250, 125)
+        # self.conv2 = GATv2Conv(125, 25)
     def forward(self, data):
         x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
         node_masks, edge_masks = data.node_masks, data.edge_masks
-        x = self.conv1(x, edge_index, edge_attr)
+        # x = self.conv1(x, edge_index)
+        # x = F.relu(x)
+        # x = self.conv2(x, edge_index)
+
+        x = self.conv1(x, edge_index,edge_attr)
         x = F.relu(x)
-        x = self.conv2(x, edge_index, edge_attr)
+        x = self.conv2(x, edge_index,edge_attr)
+
         x = F.relu(x)  # 使用ReLU作为激活函数
         # x = x * node_masks.unsqueeze(-1)
         return x
@@ -1170,10 +1378,11 @@ class InpaintSANet(torch.nn.Module):
     """
     Inpaint generator, input should be 5*256*256, where 3*256*256 is the masked image, 1*256*256 for mask, 1*256*256 is the guidence
     """
-    def __init__(self, n_in_channel=11):
+    def  __init__(self, n_in_channel=11):
         super(InpaintSANet, self).__init__()
         cnum = 32
-        self.coarse_net = nn.Sequential(
+        self.\
+            coarse_net = nn.Sequential(
 
             GatedConv2dWithActivation(n_in_channel, cnum, 5, 1, padding=get_pad(256, 5, 1)),
 
@@ -1255,3 +1464,64 @@ class InpaintSANet(torch.nn.Module):
         x= self.refine_attn(x)
         x = self.refine_upsample_net(x).tanh()
         return  x, coarse_x
+
+class ChannelAttention(nn.Module):
+    """
+    CBAM混合注意力机制的通道注意力
+    """
+    def __init__(self, in_channels, ratio=16):
+        super(ChannelAttention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+
+        self.fc = nn.Sequential(
+            # 利用1x1卷积代替全连接，避免输入必须尺度固定的问题，并减小计算量
+            nn.Conv2d(in_channels, in_channels // ratio, 1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels // ratio, in_channels, 1, bias=False)
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+       avg_out = self.fc(self.avg_pool(x))
+       max_out = self.fc(self.max_pool(x))
+       out = avg_out + max_out
+       out = self.sigmoid(out)
+       return out * x
+
+class SpatialAttention(nn.Module):
+    """
+    CBAM混合注意力机制的空间注意力
+    """
+
+    def __init__(self, kernel_size=7):
+        super(SpatialAttention, self).__init__()
+
+        assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
+        padding = 3 if kernel_size == 7 else 1
+        self.conv1 = nn.Conv2d(2, 1, kernel_size, padding=padding, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        out = torch.cat([avg_out, max_out], dim=1)
+        out = self.sigmoid(self.conv1(out))
+        return out * x
+
+
+
+class CBAM(nn.Module):
+    """
+    CBAM混合注意力机制
+    """
+
+    def __init__(self, in_channels, ratio=16, kernel_size=3):
+        super(CBAM, self).__init__()
+        self.channelattention = ChannelAttention(in_channels, ratio=ratio)
+        self.spatialattention = SpatialAttention(kernel_size=kernel_size)
+
+    def forward(self, x):
+        x = self.channelattention(x)
+        x = self.spatialattention(x)
+        return x

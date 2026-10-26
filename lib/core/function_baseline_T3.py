@@ -69,7 +69,6 @@ def mask_gen_Test(tensor, pool_w):
         # 中心点
         PoolC_x = tensor.shape[2] // 2
         PoolC_y = tensor.shape[3] // 2
-
         # 掩码范围
         hole_w_div2 = 96 // 2
         hole_h_div2 = 96 // 2
@@ -137,8 +136,7 @@ def train(config, train_loader, model, model_D, critertion, optimizer_g, optimiz
 
     Tensor = torch.cuda.FloatTensor
 
-    for i, (inp_RN, inp_Quant, inp_Vis, inp_guid_ss, inp_Nd, target_256, target_64_jc_all, target_64_st, Slopmap,graph_batch) in enumerate(train_loader):
-
+    for i, (inp_RN, inp_Quant, inp_Vis, inp_guid_ss, inp_Nd, target_256, target_64_jc_all, target_64_st, Slopmap) in enumerate(train_loader):
 
         data_time.update(time.time() - end)
         target_256 = target_256.cuda()
@@ -170,7 +168,7 @@ def train(config, train_loader, model, model_D, critertion, optimizer_g, optimiz
         Output_coarse, Output_vertices, Output_Refine, Topo_out, Topomask_out4vis, pixel_mask, x_att_score = model(
             inp_RN, inp_guid, inp_Nd,
             inp_msk, msks, inp_Vis,
-            inp_Quant,graph_batch)
+            inp_Quant)
 
         min_pixel = 0.41
         max_pixel = 0.558
@@ -440,17 +438,19 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
     length = len(val_loader)
 
     count = 0
+    diceCount=0
     total_mae = 0
     total_mse = 0
     total_ssim = 0
     total_psnr=0
+    total_dice=0
+    total_jac=0
 
     with torch.no_grad():
         # Takebatchnumber = int(random.randint(3, len(val_loader)) - 2)
         coumtcount = 0
-        for i, (
-                inp_RN, inp_Quant, inp_Vis, inp_guid_ss, inp_Nd, target_256, target_64_jc_all, target_64_st,
-                Slopmap, graphBatch) in enumerate(val_loader):
+        for i, (inp_RN, inp_Quant, inp_Vis, inp_guid_ss, inp_Nd, target_256, target_64_jc_all, target_64_st,
+                Slopmap) in enumerate(val_loader):
             data_time.update(time.time() - end)
             target_256 = target_256.cuda()
             target_64_jc_all = target_64_jc_all.cuda()
@@ -474,7 +474,8 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
             Output_coarse, Output_vertices, Output_Refine, Topo_out, Topomask_out4vis, pixel_mask, x_att_score = model(
                 inp_RN, inp_guid, inp_Nd,
                 inp_msk, msks, inp_Vis,
-                inp_Quant,graphBatch)
+                inp_Quant)
+
             min_pixel = 0.41
             max_pixel = 0.558
             mask_weight = (pixel_mask - min_pixel) / (max_pixel - min_pixel)
@@ -485,9 +486,9 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
             ST_Out_Masked_Coarse = Output_coarse * msks + target_256 * masks_0_1
             ST_Out_Masked_Refine = Output_Refine * msks + target_256 * masks_0_1
 
-            output_ST_baseline = target_256
-            output_ST_baseline_T1 = target_256
-            coarse_out_T2 = target_256
+            # output_ST_baseline = target_256
+            # output_ST_baseline_T1 = target_256
+            # coarse_out_T2 = target_256
 
             output_ST_cpu = Output_Refine.cpu().numpy()
             output_STCorase_cpu = Output_coarse.cpu().numpy()
@@ -505,25 +506,26 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
 
                 pixel_mask_log = torch.cat((pixel_mask_log, pixel_mask.detach().cpu()), dim=0)
 
-            for j in range(12):
+            for j in range(msks.size(0)):
 
                 imgss = []
-                # score_map_in_rn = inp_RN[j, :, :, :].clone().data.cpu()
-                # score_map_in_rn = (score_map_in_rn + 1) / 2 * 255
-                #
-                # score_map_in_guid = inp_guid[j, :, :, :].clone().data.cpu()
-                # score_map_in_guid = (score_map_in_guid + 1) / 2 * 255
-                #
-                # score_map_IN = np.zeros((1, 3, 256, 256))
-                # score_map_IN[0, 0:1, :, :] = score_map_in_rn[ :, :, :].numpy()
-                # score_map_IN[0, 1:2, :, :] = score_map_in_guid[:, :, :].numpy()
-                # score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
-                # imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
+                score_map_in_rn = inp_RN[j, :, :, :].clone().data.cpu()
+                score_map_in_rn = (score_map_in_rn + 1) / 2 * 255
+
+                score_map_in_guid = inp_guid[j, :, :, :].clone().data.cpu()
+                score_map_in_guid = (score_map_in_guid + 1) / 2 * 255
+
+                score_map_IN = np.zeros((1, 3, 256, 256))
+                score_map_IN[0, 0:1, :, :] = score_map_in_rn[ :, :, :].numpy()
+                score_map_IN[0, 1:2, :, :] = score_map_in_guid[:, :, :].numpy()
+                score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
+                imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
 
                 masks_cpu_Item = masks_cpu[j, :, :, :]
                 output_ST_cpu_Item = output_ST_cpu[j, :, :, :]
                 masks_0_1_cpu_Item = masks_0_1_cpu[j, :, :, :]
                 target_256_cpu_Item = target_256_cpu[j, :, :, :]
+                output_STCorase_Item= output_STCorase_cpu[j,:,:,:]
 
                 red_mask = ((masks_cpu_Item * output_ST_cpu_Item + masks_0_1_cpu_Item * target_256_cpu_Item) + 1) / 2 * 255
                 score_map_IN = np.zeros((1, 3, 256, 256))
@@ -545,13 +547,25 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
                 score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
                 imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
 
-                countOut = ST_Out_Masked_Refine * (msks)
-                GT = target_256 * (msks)
+
+                # Ours_coarse
+                # red_mask = ((masks_cpu_Item * output_STCorase_Item + masks_0_1_cpu_Item * target_256_cpu_Item) + 1) / 2 * 255
+                # score_map_IN = np.zeros((1, 3, 256, 256))
+                # score_map_IN[0, 0, :, :] = red_mask  # 设置红色通道
+                # white_non_mask = ((masks_0_1_cpu_Item * target_256_cpu_Item) + 1 - masks_cpu_Item) / 2 * 255
+                # score_map_IN[0, 1:2, :, :] = white_non_mask  # 设置绿色和蓝色通道
+                # score_map_IN[0, 2:3, :, :] = white_non_mask  # 设置绿色和蓝色通道
+                # score_map_IN = score_map_IN.squeeze(0).transpose((1, 2, 0))
+                # imgss.append(Image.fromarray(score_map_IN.astype('uint8')).convert('RGB'))
+
 
                 start_x, start_y = 80, 80
                 end_x, end_y = 176, 176
                 count_loss_GT = img1[start_x:end_x, start_y:end_y]
                 count_loss_Out = img2[start_x:end_x, start_y:end_y]
+                threshold = 128
+                binary_GT = (count_loss_GT >= threshold).astype(int)
+                binary_Out = (count_loss_Out >= threshold).astype(int)
 
                 # numpys_GT=count_loss_GT.cpu().numpy()
                 # numpys_Out=count_loss_Out.cpu().numpy()
@@ -560,6 +574,13 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
                 # print(numpys_Out)
                 # binary_array_GT = np.where(numpys_GT < -0.5, 1, 0)
                 # binary_array_OUT = np.where(numpys_Out < -0.5, 1, 0)
+
+                intersection = np.sum(binary_GT * binary_Out)
+                dice = (2 * intersection) / (np.sum(binary_GT) + np.sum(binary_Out))
+
+                # 计算 Jaccard 系数
+                union = np.sum(binary_GT) + np.sum(binary_Out) - intersection
+                jac = intersection / union
 
                 # 计算MAE和MSE
                 mae = np.mean(np.abs(count_loss_GT-count_loss_Out))
@@ -570,6 +591,7 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
                 ssim_value = ssim(count_loss_GT, count_loss_Out)
 
                 psnr_value=psnr(count_loss_GT, count_loss_Out)
+
                 total_mae += mae
                 total_mse += mse
                 total_ssim += ssim_value
@@ -577,18 +599,20 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
                     total_psnr+=100
                 else:
                     total_psnr+=psnr_value
+
                 count += 1
 
+                if not np.isnan(dice):
+                    total_dice += dice
+                    total_jac += jac
+                    diceCount+=1
+
                 coumtcount=0
-                for names in [ '输出','真实']:
-                    print(count)
-                    output_dir = log_dir + '/out_imgs/'
+                for names in ['输入', '输出', '真实']:
+                    output_dir = log_dir + '/out_imgs/实验三/'
                     if not os.path.exists(output_dir):
                         os.makedirs(output_dir)
-                    outputname = log_dir + '/out_imgs/Geostreet_' + str(epoch) + "_Test_" + str(
-                        i) + "_" + names + "_"+str(j)+".png"
-                    if coumtcount >= len(imgss):
-                        break;
+                    outputname = log_dir + '/out_imgs/实验三/' + "Test" + str(count) + "_" + names + ".png"
                     imgss[coumtcount].save(outputname)
                     coumtcount = coumtcount + 1
 
@@ -597,11 +621,15 @@ def validate(config, val_loader, model, model_D, critertion, epoch, writer_dict,
     average_mse = total_mse / count
     average_ssim = total_ssim / count
     average_psnr=total_psnr/count
+    average_dice=total_dice/diceCount
+    average_jac=total_jac/diceCount
 
     print(f"平均MAE: {average_mae}")
     print(f"平均MSE: {average_mse}")
     print(f"平均SSIM: {average_ssim}")
     print(f"平均PSNR: {average_psnr}")
+    print(f"平均Dice: {average_dice}")
+    print(f"平均Jac: {average_jac}")
     import pickle
     # with open(save_dir, "wb") as fp:
     #     pickle.dump(all_data, fp)

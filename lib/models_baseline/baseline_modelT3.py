@@ -49,7 +49,7 @@ class Baseline_Net(nn.Module):
         self.relu = nn.ReLU()
 
     # 传入路网结构
-    def forward(self, x_rn, x_guid, x_Nd, x_msk, msk10, x_Vis, x_Quant,graph_batch):
+    def forward(self, x_rn, x_guid, x_Nd, x_msk, msk10, x_Vis, x_Quant):
 
         # 地理信息通道融合
         Raw_In = torch.cat((x_Quant.clone(), x_Vis.clone()), 1)
@@ -61,8 +61,7 @@ class Baseline_Net(nn.Module):
         x_out_1, x_out_vertices, x_out_2, Topoprocessed, pixel_mask = self.endec_model(masks=msk10, ContextRN=x_rn,
                                                                            GuidRefine=x_guid, NDRefine=x_Nd,
                                                                            TopoRaw=Raw_In_atted,
-                                                                           pixel_mask=pixel_mask,
-                                                                                       graph_batch=graph_batch)
+                                                                           pixel_mask=pixel_mask)
 
         return x_out_1, x_out_vertices, x_out_2, Topoprocessed, pixel_mask_4vis, pixel_mask, x_att_score
 
